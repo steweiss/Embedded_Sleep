@@ -1,0 +1,121 @@
+
+```{r}
+############################### HRV ANALYSIS ###################################
+############################### SHOWS ERROR MESSAGE BEFORE QRS DETECTION ###################################
+
+if(shiny_running()){
+  fillCol(
+    renderTable({
+      res=as.data.frame(ExG$hrv[[2]]["TimeAnalysis"])
+      colnames(res)=unlist(lapply(strsplit(colnames(res),"TimeAnalysis."),function(x)x[[2]]))
+      round(res,0)
+      }),
+    fillRow(
+      renderPlot({PlotSinglePowerBand(ExG$hrv[[1]], 1, "LF/HF",doPlot=T,
+                                      main="heart related stress adaption",                 
+                                      eplim=c(min(ExG$hrv[[1]]$FreqAnalysis[[1]]$LFHF),
+                                              max(ExG$hrv[[1]]$FreqAnalysis[[1]]$LFHF)))
+        }),
+      renderPlot({
+        PoincarePlot(ExG$hrv[[3]],indexNonLinearAnalysis=1,timeLag=1, doPlot=T)
+        })
+      ),flex=c(1,5)
+  )
+}else{
+  ############################### FOR DISPLAY IN REPORT ###################################
+  ############################### CURRENTLY NOT WORKING ###################################
+  kable(as.data.frame(EXG$hrv[[2]]["TimeAnalysis"]))
+  PlotSinglePowerBand(EXG$hrv[[1]], 1, "LF/HF",doPlot=T,main="heart related stress adaption",                     eplim=c(min(EXG$hrv[[1]]$FreqAnalysis[[1]]$LFHF),max(EXG$hrv[[1]]$FreqAnalysis[[1]]$LFHF)))
+  PoincarePlot(EXG$hrv[[3]],indexNonLinearAnalysis=1,timeLag=1, doPlot=T)
+}
+
+```
+
+***
+
+```{r}
+if(shiny_running()){
+  sliderInput("L", label = "Window Length", min = 10,max = 50, value = 30,step=1)
+}
+
+if(shiny_running()){
+  # dropdown(
+  # tags$h3("List of Input"),
+  renderUI({
+  eeg_choicings=c(graph_data$EEG)
+
+  pickerInput(
+    inputId = "eeg_ana",
+    label = "Select Channel for Sleep Spindles & Baandpower",
+    choices =c(eeg_choicings),
+    options = list(
+    `actions-box` = TRUE,
+    size = 10
+  ),
+  multiple = F
+  )
+  })
+}
+
+
+if(shiny_running()){
+  # dropdown(
+  # tags$h3("List of Input"),
+  renderUI({
+    ecg_choicings=c(graph_data$ECG)
+
+  pickerInput(
+    inputId = "ecg_ana",
+    label = "Select Channel for QRS Detection",
+    choices =ecg_choicings,
+    options = list(
+    `actions-box` = TRUE,
+    size = 10
+  ),
+  multiple = F
+  )
+  })
+}
+if(shiny_running()){
+  actionButton("ana_button", label = "Analyze")
+}
+
+```
+
+
+```{r}
+if(shiny_running()){
+  observeEvent(input$ana_button,{
+  if(!is.null(input$ecg_ana)){
+    res=py$qrs_detect(coredata(ExG$ts)[,input$ecg_ana],ExG$srate)
+    ExG$qrs=data.frame(rep("QRS",length(res)),first(index(ExG$ts))+res)
+    ExG$hrv=hrv_analysis(res,ExG$srate,mainDir)
+  }
+  if(!is.null(input$eeg_ana)){
+    tmp_bp=rel_bp(coredata(ExG$freq)[,paste0("Filtered",input$eeg_ana)])
+    
+    ExG$bandpower=as.xts((tmp_bp[,1:5]/tmp_bp[,6])*100,seq(ExG$posix, by=input$L, length=nrow(tmp_bp)))
+    
+    ExG$spindles=NULL
+    res2=data.frame()
+  
+    for(i in 1:(nrow(ExG$stages)-1)){
+      ## Limit stages
+          if((ExG$stages[i,1]%in% c("S1","S2","S3"))){
+            ## For last entry take time to end, else take time to next stage
+            if(i!=(nrow(ExG$stages)-1)){tmp=window(ExG$freq,start=ExG$stages[i,2],end=ExG$stages[i+1,2])
+            }else{tmp=window(ExG$freq,start=ExG$stages[i,2],end=last(index(ExG$freq)))}
+            ## Collect Sleep Spindles by Yasa
+            res<-data.frame(
+              py$sleep_spindles(tmp[,paste0("Filtered",input$eeg_ana)],ExG$srate),
+              stringsAsFactors = F)[,c("Start","Duration","Oscillations")]
+            res2=rbind(res2,data.frame(Start=ExG$stages[i,2]+res$Start,stringsAsFactors = F))
+          }
+      }
+    ExG$spindles=setNames(
+      data.frame(rep("Spindle",nrow(res2)),res2$Start,stringsAsFactors = F),c("Event","Time"))
+    }
+    })
+  }
+
+```
